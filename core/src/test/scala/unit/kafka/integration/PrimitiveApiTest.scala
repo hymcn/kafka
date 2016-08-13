@@ -34,7 +34,8 @@ import java.util.Properties
 /**
  * End to end tests of the primitive apis against a local server
  */
-class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHarness {
+@deprecated("This test has been deprecated and it will be removed in a future release", "0.10.0.0")
+class PrimitiveApiTest extends ProducerConsumerTestHarness {
   val requestHandlerLogger = Logger.getLogger(classOf[KafkaRequestHandler])
 
   def generateConfigs() = List(KafkaConfig.fromProps(TestUtils.createBrokerConfig(0, zkConnect)))
@@ -61,7 +62,7 @@ class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHar
     val partitionRequests = immutable.Map[TopicAndPartition, PartitionFetchInfo]()
     val request = new FetchRequest(requestInfo = partitionRequests)
     val fetched = consumer.fetch(request)
-    assertTrue(!fetched.hasError && fetched.data.size == 0)
+    assertTrue(!fetched.hasError && fetched.data.isEmpty)
   }
 
   @Test
@@ -113,7 +114,7 @@ class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHar
 
   private def produceAndMultiFetch(producer: Producer[String, String]) {
     for(topic <- List("test1", "test2", "test3", "test4"))
-      TestUtils.createTopic(zkClient, topic, servers = servers)
+      TestUtils.createTopic(zkUtils, topic, servers = servers)
 
     // send some messages
     val topics = List(("test4", 0), ("test1", 0), ("test2", 0), ("test3", 0));
@@ -151,7 +152,7 @@ class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHar
         response.data.values.foreach(pdata => ErrorMapping.maybeThrowException(pdata.error))
         fail("Expected exception when fetching message with invalid offset")
       } catch {
-        case e: OffsetOutOfRangeException => "this is good"
+        case e: OffsetOutOfRangeException => // This is good.
       }
     }
 
@@ -167,7 +168,7 @@ class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHar
         response.data.values.foreach(pdata => ErrorMapping.maybeThrowException(pdata.error))
         fail("Expected exception when fetching message with invalid partition")
       } catch {
-        case e: UnknownTopicOrPartitionException => "this is good"
+        case e: UnknownTopicOrPartitionException => // This is good.
       }
     }
 
@@ -182,7 +183,7 @@ class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHar
 
   private def multiProduce(producer: Producer[String, String]) {
     val topics = Map("test4" -> 0, "test1" -> 0, "test2" -> 0, "test3" -> 0)
-    topics.keys.map(topic => TestUtils.createTopic(zkClient, topic, servers = servers))
+    topics.keys.map(topic => TestUtils.createTopic(zkUtils, topic, servers = servers))
 
     val messages = new mutable.HashMap[String, Seq[String]]
     val builder = new FetchRequestBuilder()
@@ -210,7 +211,7 @@ class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHar
   @Test
   def testConsumerEmptyTopic() {
     val newTopic = "new-topic"
-    TestUtils.createTopic(zkClient, newTopic, numPartitions = 1, replicationFactor = 1, servers = servers)
+    TestUtils.createTopic(zkUtils, newTopic, numPartitions = 1, replicationFactor = 1, servers = servers)
 
     val fetchResponse = consumer.fetch(new FetchRequestBuilder().addFetch(newTopic, 0, 0, 10000).build())
     assertFalse(fetchResponse.messageSet(newTopic, 0).iterator.hasNext)
@@ -219,7 +220,7 @@ class PrimitiveApiTest extends ProducerConsumerTestHarness with ZooKeeperTestHar
   @Test
   def testPipelinedProduceRequests() {
     val topics = Map("test4" -> 0, "test1" -> 0, "test2" -> 0, "test3" -> 0)
-    topics.keys.map(topic => TestUtils.createTopic(zkClient, topic, servers = servers))
+    topics.keys.map(topic => TestUtils.createTopic(zkUtils, topic, servers = servers))
     val props = new Properties()
     props.put("request.required.acks", "0")
     val pipelinedProducer: Producer[String, String] =

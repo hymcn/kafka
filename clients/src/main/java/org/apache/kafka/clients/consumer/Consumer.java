@@ -3,33 +3,33 @@
  * file distributed with this work for additional information regarding copyright ownership. The ASF licenses this file
  * to You under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the
  * License. You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
  * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
  * specific language governing permissions and limitations under the License.
  */
 package org.apache.kafka.clients.consumer;
 
+import org.apache.kafka.common.Metric;
+import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
+
 import java.io.Closeable;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
-import org.apache.kafka.common.Metric;
-import org.apache.kafka.common.PartitionInfo;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.MetricName;
-import org.apache.kafka.common.annotation.InterfaceStability;
+import java.util.regex.Pattern;
 
 /**
  * @see KafkaConsumer
  * @see MockConsumer
  */
-@InterfaceStability.Unstable
 public interface Consumer<K, V> extends Closeable {
-    
+
     /**
      * @see KafkaConsumer#assignment()
      */
@@ -41,19 +41,29 @@ public interface Consumer<K, V> extends Closeable {
     public Set<String> subscription();
 
     /**
-     * @see KafkaConsumer#subscribe(List)
+     * @see KafkaConsumer#subscribe(Collection)
      */
-    public void subscribe(List<String> topics);
+    public void subscribe(Collection<String> topics);
 
     /**
-     * @see KafkaConsumer#subscribe(List, ConsumerRebalanceListener)
+     * @see KafkaConsumer#subscribe(Collection, ConsumerRebalanceListener)
      */
-    public void subscribe(List<String> topics, ConsumerRebalanceListener callback);
+    public void subscribe(Collection<String> topics, ConsumerRebalanceListener callback);
 
     /**
-     * @see KafkaConsumer#assign(List)
+     * @see KafkaConsumer#assign(Collection)
      */
-    public void assign(List<TopicPartition> partitions);
+    public void assign(Collection<TopicPartition> partitions);
+
+    /**
+    * @see KafkaConsumer#subscribe(Pattern, ConsumerRebalanceListener)
+    */
+    public void subscribe(Pattern pattern, ConsumerRebalanceListener callback);
+
+    /**
+     * @see KafkaConsumer#unsubscribe()
+     */
+    public void unsubscribe();
 
     /**
      * @see KafkaConsumer#poll(long)
@@ -61,24 +71,29 @@ public interface Consumer<K, V> extends Closeable {
     public ConsumerRecords<K, V> poll(long timeout);
 
     /**
-     * @see KafkaConsumer#commit(CommitType)
+     * @see KafkaConsumer#commitSync()
      */
-    public void commit(CommitType commitType);
+    public void commitSync();
 
     /**
-     * @see KafkaConsumer#commit(CommitType, ConsumerCommitCallback)
+     * @see KafkaConsumer#commitSync(Map)
      */
-    public void commit(CommitType commitType, ConsumerCommitCallback callback);
+    public void commitSync(Map<TopicPartition, OffsetAndMetadata> offsets);
 
     /**
-     * @see KafkaConsumer#commit(Map, CommitType)
+     * @see KafkaConsumer#commitAsync()
      */
-    public void commit(Map<TopicPartition, Long> offsets, CommitType commitType);
+    public void commitAsync();
 
     /**
-     * @see KafkaConsumer#commit(Map, CommitType, ConsumerCommitCallback)
+     * @see KafkaConsumer#commitAsync(OffsetCommitCallback)
      */
-    public void commit(Map<TopicPartition, Long> offsets, CommitType commitType, ConsumerCommitCallback callback);
+    public void commitAsync(OffsetCommitCallback callback);
+
+    /**
+     * @see KafkaConsumer#commitAsync(Map, OffsetCommitCallback)
+     */
+    public void commitAsync(Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback);
 
     /**
      * @see KafkaConsumer#seek(TopicPartition, long)
@@ -86,14 +101,14 @@ public interface Consumer<K, V> extends Closeable {
     public void seek(TopicPartition partition, long offset);
 
     /**
-     * @see KafkaConsumer#seekToBeginning(TopicPartition...)
+     * @see KafkaConsumer#seekToBeginning(Collection)
      */
-    public void seekToBeginning(TopicPartition... partitions);
+    public void seekToBeginning(Collection<TopicPartition> partitions);
 
     /**
-     * @see KafkaConsumer#seekToEnd(TopicPartition...)
+     * @see KafkaConsumer#seekToEnd(Collection)
      */
-    public void seekToEnd(TopicPartition... partitions);
+    public void seekToEnd(Collection<TopicPartition> partitions);
 
     /**
      * @see KafkaConsumer#position(TopicPartition)
@@ -103,7 +118,7 @@ public interface Consumer<K, V> extends Closeable {
     /**
      * @see KafkaConsumer#committed(TopicPartition)
      */
-    public long committed(TopicPartition partition);
+    public OffsetAndMetadata committed(TopicPartition partition);
 
     /**
      * @see KafkaConsumer#metrics()
@@ -121,14 +136,19 @@ public interface Consumer<K, V> extends Closeable {
     public Map<String, List<PartitionInfo>> listTopics();
 
     /**
-     * @see KafkaConsumer#pause(TopicPartition...)
+     * @see KafkaConsumer#paused()
      */
-    public void pause(TopicPartition... partitions);
+    public Set<TopicPartition> paused();
 
     /**
-     * @see KafkaConsumer#resume(TopicPartition...)
+     * @see KafkaConsumer#pause(Collection)
      */
-    public void resume(TopicPartition... partitions);
+    public void pause(Collection<TopicPartition> partitions);
+
+    /**
+     * @see KafkaConsumer#resume(Collection)
+     */
+    public void resume(Collection<TopicPartition> partitions);
 
     /**
      * @see KafkaConsumer#close()

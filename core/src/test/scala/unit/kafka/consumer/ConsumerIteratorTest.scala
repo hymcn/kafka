@@ -20,9 +20,11 @@ package kafka.consumer
 
 import java.util.concurrent._
 import java.util.concurrent.atomic._
+
+import kafka.common.LongRef
+
 import scala.collection._
 import org.junit.Assert._
-
 import kafka.message._
 import kafka.server._
 import kafka.utils.TestUtils._
@@ -57,16 +59,16 @@ class ConsumerIteratorTest extends KafkaServerTestHarness {
       new AtomicLong(0),
       new AtomicInteger(0),
       ""))
-    createTopic(zkClient, topic, partitionReplicaAssignment = Map(0 -> Seq(configs.head.brokerId)), servers = servers)
+    createTopic(zkUtils, topic, partitionReplicaAssignment = Map(0 -> Seq(configs.head.brokerId)), servers = servers)
   }
 
   @Test
   def testConsumerIteratorDeduplicationDeepIterator() {
     val messageStrings = (0 until 10).map(_.toString).toList
     val messages = messageStrings.map(s => new Message(s.getBytes))
-    val messageSet = new ByteBufferMessageSet(DefaultCompressionCodec, new AtomicLong(0), messages:_*)
+    val messageSet = new ByteBufferMessageSet(DefaultCompressionCodec, new LongRef(0), messages:_*)
 
-    topicInfos(0).enqueue(messageSet)
+    topicInfos.head.enqueue(messageSet)
     assertEquals(1, queue.size)
     queue.put(ZookeeperConsumerConnector.shutdownCommand)
 
@@ -88,9 +90,9 @@ class ConsumerIteratorTest extends KafkaServerTestHarness {
   def testConsumerIteratorDecodingFailure() {
     val messageStrings = (0 until 10).map(_.toString).toList
     val messages = messageStrings.map(s => new Message(s.getBytes))
-    val messageSet = new ByteBufferMessageSet(NoCompressionCodec, new AtomicLong(0), messages:_*)
+    val messageSet = new ByteBufferMessageSet(NoCompressionCodec, new LongRef(0), messages:_*)
 
-    topicInfos(0).enqueue(messageSet)
+    topicInfos.head.enqueue(messageSet)
     assertEquals(1, queue.size)
 
     val iter = new ConsumerIterator[String, String](queue,

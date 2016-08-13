@@ -11,6 +11,8 @@ patch-process/*
 .idea
 .svn
 .classpath
+/.metadata
+/.recommenders
 *~
 *#
 .#*
@@ -25,6 +27,7 @@ kafka.iws
 .vagrant
 Vagrantfile.local
 /logs
+.DS_Store
 
 config/server-*
 config/zookeeper-*
@@ -35,3 +38,6 @@ results
 tests/results
 .ducktape
 tests/.ducktape
+.cache
+
+docs/generated/

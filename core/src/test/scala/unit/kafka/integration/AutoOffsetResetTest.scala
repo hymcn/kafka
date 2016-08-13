@@ -28,6 +28,7 @@ import org.junit.{After, Before, Test}
 import org.apache.log4j.{Level, Logger}
 import org.junit.Assert._
 
+@deprecated("This test has been deprecated and it will be removed in a future release", "0.10.0.0")
 class AutoOffsetResetTest extends KafkaServerTestHarness with Logging {
 
   def generateConfigs() = List(KafkaConfig.fromProps(TestUtils.createBrokerConfig(0, zkConnect)))
@@ -76,7 +77,7 @@ class AutoOffsetResetTest extends KafkaServerTestHarness with Logging {
    * Returns the count of messages received.
    */
   def resetAndConsume(numMessages: Int, resetTo: String, offset: Long): Int = {
-    TestUtils.createTopic(zkClient, topic, 1, 1, servers)
+    TestUtils.createTopic(zkUtils, topic, 1, 1, servers)
 
     val producer: Producer[String, Array[Byte]] = TestUtils.createProducer(
       TestUtils.getBrokerListStrFromServers(servers),

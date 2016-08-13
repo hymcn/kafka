@@ -17,15 +17,18 @@
 
 package kafka.admin
 
-import joptsimple._
 import java.util.Properties
-import kafka.log.LogConfig
-import kafka.server.ConfigType
-import kafka.utils.{ZkUtils, CommandLineUtils}
-import org.I0Itec.zkclient.ZkClient
-import scala.collection._
-import scala.collection.JavaConversions._
+
+import joptsimple._
+import kafka.admin.TopicCommand._
+import kafka.log.{Defaults, LogConfig}
+import kafka.server.{ClientConfigOverride, ConfigType}
+import kafka.utils.{CommandLineUtils, ZkUtils}
+import org.apache.kafka.common.security.JaasUtils
 import org.apache.kafka.common.utils.Utils
+
+import scala.collection.JavaConversions._
+import scala.collection._
 
 
 /**
@@ -42,69 +45,89 @@ object ConfigCommand {
 
     opts.checkArgs()
 
-    val zkClient = ZkUtils.createZkClient(opts.options.valueOf(opts.zkConnectOpt), 30000, 30000)
+    val zkUtils = ZkUtils(opts.options.valueOf(opts.zkConnectOpt),
+                          30000,
+                          30000,
+                          JaasUtils.isZkSecurityEnabled())
 
     try {
       if (opts.options.has(opts.alterOpt))
-        alterConfig(zkClient, opts)
+        alterConfig(zkUtils, opts)
       else if (opts.options.has(opts.describeOpt))
-        describeConfig(zkClient, opts)
+        describeConfig(zkUtils, opts)
     } catch {
       case e: Throwable =>
         println("Error while executing topic command " + e.getMessage)
         println(Utils.stackTrace(e))
     } finally {
-      zkClient.close()
+      zkUtils.close()
     }
   }
 
-  private def alterConfig(zkClient: ZkClient, opts: ConfigCommandOptions) {
+  private def alterConfig(zkUtils: ZkUtils, opts: ConfigCommandOptions) {
     val configsToBeAdded = parseConfigsToBeAdded(opts)
     val configsToBeDeleted = parseConfigsToBeDeleted(opts)
     val entityType = opts.options.valueOf(opts.entityType)
     val entityName = opts.options.valueOf(opts.entityName)
+    warnOnMaxMessagesChange(configsToBeAdded, opts.options.has(opts.forceOpt))
 
     // compile the final set of configs
-    val configs = AdminUtils.fetchEntityConfig(zkClient, entityType, entityName)
+    val configs = AdminUtils.fetchEntityConfig(zkUtils, entityType, entityName)
     configs.putAll(configsToBeAdded)
     configsToBeDeleted.foreach(config => configs.remove(config))
 
     if (entityType.equals(ConfigType.Topic)) {
-      AdminUtils.changeTopicConfig(zkClient, entityName, configs)
+      AdminUtils.changeTopicConfig(zkUtils, entityName, configs)
       println("Updated config for topic: \"%s\".".format(entityName))
     } else {
-      AdminUtils.changeClientIdConfig(zkClient, entityName, configs)
+      AdminUtils.changeClientIdConfig(zkUtils, entityName, configs)
       println("Updated config for clientId: \"%s\".".format(entityName))
     }
   }
 
-  private def describeConfig(zkClient: ZkClient, opts: ConfigCommandOptions) {
+  def warnOnMaxMessagesChange(configs: Properties, force: Boolean): Unit = {
+    val maxMessageBytes = configs.get(LogConfig.MaxMessageBytesProp) match {
+      case n: String => n.toInt
+      case _ => -1
+    }
+    if (maxMessageBytes > Defaults.MaxMessageSize){
+      error(TopicCommand.longMessageSizeWarning(maxMessageBytes))
+      if (!force)
+        TopicCommand.askToProceed
+    }
+  }
+
+  private def describeConfig(zkUtils: ZkUtils, opts: ConfigCommandOptions) {
     val entityType = opts.options.valueOf(opts.entityType)
     val entityNames: Seq[String] =
       if (opts.options.has(opts.entityName))
         Seq(opts.options.valueOf(opts.entityName))
       else
-        ZkUtils.getAllEntitiesWithConfig(zkClient, entityType)
+        zkUtils.getAllEntitiesWithConfig(entityType)
 
     for (entityName <- entityNames) {
-      val configs = AdminUtils.fetchEntityConfig(zkClient, entityType, entityName)
+      val configs = AdminUtils.fetchEntityConfig(zkUtils, entityType, entityName)
       println("Configs for %s:%s are %s"
-                      .format(entityType, entityName, configs.map(kv => kv._1 + "=" + kv._2).mkString(",")))
+        .format(entityType, entityName, configs.map(kv => kv._1 + "=" + kv._2).mkString(",")))
     }
   }
 
   private[admin] def parseConfigsToBeAdded(opts: ConfigCommandOptions): Properties = {
-    val configsToBeAdded = opts.options.valuesOf(opts.addedConfig).map(_.split("""\s*=\s*"""))
+    val configsToBeAdded = opts.options.valuesOf(opts.addConfig).map(_.split("""\s*=\s*"""))
     require(configsToBeAdded.forall(config => config.length == 2),
-            "Invalid entity config: all configs to be added must be in the format \"key=val\".")
+      "Invalid entity config: all configs to be added must be in the format \"key=val\".")
     val props = new Properties
     configsToBeAdded.foreach(pair => props.setProperty(pair(0).trim, pair(1).trim))
+    if (props.containsKey(LogConfig.MessageFormatVersionProp)) {
+      println(s"WARNING: The configuration ${LogConfig.MessageFormatVersionProp}=${props.getProperty(LogConfig.MessageFormatVersionProp)} is specified. " +
+        s"This configuration will be ignored if the version is newer than the inter.broker.protocol.version specified in the broker.")
+    }
     props
   }
 
   private[admin] def parseConfigsToBeDeleted(opts: ConfigCommandOptions): Seq[String] = {
-    if (opts.options.has(opts.deletedConfig)) {
-      val configsToBeDeleted = opts.options.valuesOf(opts.deletedConfig).map(_.trim())
+    if (opts.options.has(opts.deleteConfig)) {
+      val configsToBeDeleted = opts.options.valuesOf(opts.deleteConfig).map(_.trim())
       val propsToBeDeleted = new Properties
       configsToBeDeleted.foreach(propsToBeDeleted.setProperty(_, ""))
       configsToBeDeleted
@@ -130,20 +153,22 @@ object ConfigCommand {
             .ofType(classOf[String])
 
     val nl = System.getProperty("line.separator")
-    val addedConfig = parser.accepts("added-config", "Key Value pairs configs to add 'k1=v1,k2=v2'. The following is a list of valid configurations: " +
+    val addConfig = parser.accepts("add-config", "Key Value pairs configs to add 'k1=v1,k2=v2'. The following is a list of valid configurations: " +
             "For entity_type '" + ConfigType.Topic + "': " + nl + LogConfig.configNames.map("\t" + _).mkString(nl) + nl +
-            "For entity_type '" + ConfigType.Client + "' currently no configs are processed by the brokers")
+            "For entity_type '" + ConfigType.Client + "': " + nl + "\t" + ClientConfigOverride.ProducerOverride
+                                                            + nl + "\t" + ClientConfigOverride.ConsumerOverride)
             .withRequiredArg
             .ofType(classOf[String])
             .withValuesSeparatedBy(',')
-    val deletedConfig = parser.accepts("deleted-config", "config keys to remove 'k1,k2'")
+    val deleteConfig = parser.accepts("delete-config", "config keys to remove 'k1,k2'")
             .withRequiredArg
             .ofType(classOf[String])
             .withValuesSeparatedBy(',')
     val helpOpt = parser.accepts("help", "Print usage information.")
+    val forceOpt = parser.accepts("force", "Suppress console prompts")
     val options = parser.parse(args : _*)
 
-    val allOpts: Set[OptionSpec[_]] = Set(alterOpt, describeOpt, entityType, entityName, addedConfig, deletedConfig, helpOpt)
+    val allOpts: Set[OptionSpec[_]] = Set(alterOpt, describeOpt, entityType, entityName, addConfig, deleteConfig, helpOpt)
 
     def checkArgs() {
       // should have exactly one action
@@ -154,15 +179,15 @@ object ConfigCommand {
       // check required args
       CommandLineUtils.checkRequiredArgs(parser, options, zkConnectOpt, entityType)
       CommandLineUtils.checkInvalidArgs(parser, options, alterOpt, Set(describeOpt))
-      CommandLineUtils.checkInvalidArgs(parser, options, describeOpt, Set(alterOpt, addedConfig, deletedConfig))
+      CommandLineUtils.checkInvalidArgs(parser, options, describeOpt, Set(alterOpt, addConfig, deleteConfig))
       if(options.has(alterOpt)) {
         if(! options.has(entityName))
           throw new IllegalArgumentException("--entity-name must be specified with --alter")
 
-        val isAddedPresent: Boolean = options.has(addedConfig)
-        val isDeletedPresent: Boolean = options.has(deletedConfig)
-        if(! isAddedPresent && ! isDeletedPresent)
-          throw new IllegalArgumentException("At least one of --added-config or --deleted-config must be specified with --alter")
+        val isAddConfigPresent: Boolean = options.has(addConfig)
+        val isDeleteConfigPresent: Boolean = options.has(deleteConfig)
+        if(! isAddConfigPresent && ! isDeleteConfigPresent)
+          throw new IllegalArgumentException("At least one of --add-config or --delete-config must be specified with --alter")
       }
       val entityTypeVal = options.valueOf(entityType)
       if(! entityTypeVal.equals(ConfigType.Topic) && ! entityTypeVal.equals(ConfigType.Client)) {

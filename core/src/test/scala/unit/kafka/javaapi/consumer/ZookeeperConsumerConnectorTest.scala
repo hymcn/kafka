@@ -36,8 +36,8 @@ import scala.collection.JavaConversions
 import org.apache.log4j.{Level, Logger}
 import org.junit.Assert._
 
-
-class ZookeeperConsumerConnectorTest extends KafkaServerTestHarness with ZooKeeperTestHarness with Logging {
+@deprecated("This test has been deprecated and it will be removed in a future release", "0.10.0.0")
+class ZookeeperConsumerConnectorTest extends KafkaServerTestHarness with Logging {
   val numNodes = 2
   val numParts = 2
   val topic = "topic1"
@@ -57,7 +57,7 @@ class ZookeeperConsumerConnectorTest extends KafkaServerTestHarness with ZooKeep
     requestHandlerLogger.setLevel(Level.FATAL)
 
     // create the topic
-    TestUtils.createTopic(zkClient, topic, numParts, 1, servers)
+    TestUtils.createTopic(zkUtils, topic, numParts, 1, servers)
 
     // send some messages to each broker
     val sentMessages1 = sendMessages(servers, nMessages, "batch1")

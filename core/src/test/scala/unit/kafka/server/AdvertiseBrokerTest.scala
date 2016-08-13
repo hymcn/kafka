@@ -43,13 +43,13 @@ class AdvertiseBrokerTest extends ZooKeeperTestHarness {
   @After
   override def tearDown() {
     server.shutdown()
-    CoreUtils.rm(server.config.logDirs)
+    CoreUtils.delete(server.config.logDirs)
     super.tearDown()
   }
 
   @Test
   def testBrokerAdvertiseToZK {
-    val brokerInfo = ZkUtils.getBrokerInfo(zkClient, brokerId)
+    val brokerInfo = zkUtils.getBrokerInfo(brokerId)
     val endpoint = brokerInfo.get.endPoints.get(SecurityProtocol.PLAINTEXT).get
     assertEquals(advertisedHostName, endpoint.host)
     assertEquals(advertisedPort, endpoint.port)

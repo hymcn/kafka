@@ -23,17 +23,15 @@ package org.apache.kafka.common.network;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.SelectionKey;
 
 import java.security.Principal;
 
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class PlaintextTransportLayer implements TransportLayer {
-    private static final Logger log = LoggerFactory.getLogger(PlaintextTransportLayer.class);
     private final SelectionKey key;
     private final SocketChannel socketChannel;
     private final Principal principal = KafkaPrincipal.ANONYMOUS;
@@ -49,12 +47,11 @@ public class PlaintextTransportLayer implements TransportLayer {
     }
 
     @Override
-    public void finishConnect() throws IOException {
-        socketChannel.finishConnect();
-        int ops = key.interestOps();
-        ops &= ~SelectionKey.OP_CONNECT;
-        ops |= SelectionKey.OP_READ;
-        key.interestOps(ops);
+    public boolean finishConnect() throws IOException {
+        boolean connected = socketChannel.finishConnect();
+        if (connected)
+            key.interestOps(key.interestOps() & ~SelectionKey.OP_CONNECT | SelectionKey.OP_READ);
+        return connected;
     }
 
     @Override
@@ -84,10 +81,13 @@ public class PlaintextTransportLayer implements TransportLayer {
      */
     @Override
     public void close() throws IOException {
-        socketChannel.socket().close();
-        socketChannel.close();
-        key.attach(null);
-        key.cancel();
+        try {
+            socketChannel.socket().close();
+            socketChannel.close();
+        } finally {
+            key.attach(null);
+            key.cancel();
+        }
     }
 
     /**
@@ -192,7 +192,7 @@ public class PlaintextTransportLayer implements TransportLayer {
 
     /**
      * Adds the interestOps to selectionKey.
-     * @param interestOps
+     * @param ops
      */
     @Override
     public void addInterestOps(int ops) {
@@ -202,7 +202,7 @@ public class PlaintextTransportLayer implements TransportLayer {
 
     /**
      * Removes the interestOps from selectionKey.
-     * @param interestOps
+     * @param ops
      */
     @Override
     public void removeInterestOps(int ops) {
@@ -212,5 +212,10 @@ public class PlaintextTransportLayer implements TransportLayer {
     @Override
     public boolean isMute() {
         return key.isValid() && (key.interestOps() & SelectionKey.OP_READ) == 0;
+    }
+
+    @Override
+    public long transferFrom(FileChannel fileChannel, long position, long count) throws IOException {
+        return fileChannel.transferTo(position, count, socketChannel);
     }
 }

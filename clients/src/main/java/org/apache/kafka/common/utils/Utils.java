@@ -14,6 +14,7 @@ package org.apache.kafka.common.utils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.OutputStream;
@@ -23,9 +24,19 @@ import java.io.StringWriter;
 import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.Properties;
@@ -40,11 +51,23 @@ public class Utils {
 
     // This matches URIs of formats: host:port and protocol:\\host:port
     // IPv6 is supported with [ip] pattern
-    private static final Pattern HOST_PORT_PATTERN = Pattern.compile(".*?\\[?([0-9a-z\\-.:]*)\\]?:([0-9]+)");
+    private static final Pattern HOST_PORT_PATTERN = Pattern.compile(".*?\\[?([0-9a-zA-Z\\-%.:]*)\\]?:([0-9]+)");
 
     public static final String NL = System.getProperty("line.separator");
 
     private static final Logger log = LoggerFactory.getLogger(Utils.class);
+
+    /**
+     * Get a sorted list representation of a collection.
+     * @param collection The collection to sort
+     * @param <T> The class of objects in the collection
+     * @return An unmodifiable sorted list with the contents of the collection
+     */
+    public static <T extends Comparable<? super T>> List<T> sorted(Collection<T> collection) {
+        List<T> res = new ArrayList<>(collection);
+        Collections.sort(res);
+        return Collections.unmodifiableList(res);
+    }
 
     /**
      * Turn the given UTF8 byte array into a string
@@ -109,6 +132,21 @@ public class Utils {
     }
 
     /**
+     * Get the little-endian value of an integer as a byte array.
+     * @param val The value to convert to a little-endian array
+     * @return The little-endian encoded array of bytes for the value
+     */
+    public static byte[] toArrayLE(int val) {
+        return new byte[] {
+            (byte) (val >> 8 * 0),
+            (byte) (val >> 8 * 1),
+            (byte) (val >> 8 * 2),
+            (byte) (val >> 8 * 3)
+        };
+    }
+
+
+    /**
      * Read an unsigned integer stored in little-endian format from a byte array
      * at a given offset.
      *
@@ -129,7 +167,7 @@ public class Utils {
      * @param buffer The buffer to write to
      * @param value The value to write
      */
-    public static void writetUnsignedInt(ByteBuffer buffer, long value) {
+    public static void writeUnsignedInt(ByteBuffer buffer, long value) {
         buffer.putInt((int) (value & 0xffffffffL));
     }
 
@@ -291,7 +329,7 @@ public class Utils {
      * @return the new instance
      */
     public static <T> T newInstance(String klass, Class<T> base) throws ClassNotFoundException {
-        return Utils.newInstance(Class.forName(klass).asSubclass(base));
+        return Utils.newInstance(Class.forName(klass, true, Utils.getContextOrKafkaClassLoader()).asSubclass(base));
     }
 
     /**
@@ -405,15 +443,21 @@ public class Utils {
      */
     public static Properties loadProps(String filename) throws IOException, FileNotFoundException {
         Properties props = new Properties();
-        InputStream propStream = null;
-        try {
-            propStream = new FileInputStream(filename);
+        try (InputStream propStream = new FileInputStream(filename)) {
             props.load(propStream);
-        } finally {
-            if (propStream != null)
-                propStream.close();
         }
         return props;
+    }
+
+    /**
+     * Converts a Properties object to a Map<String, String>, calling {@link #toString} to ensure all keys and values
+     * are Strings.
+     */
+    public static Map<String, String> propsToStringMap(Properties props) {
+        Map<String, String> result = new HashMap<>();
+        for (Map.Entry<Object, Object> entry : props.entrySet())
+            result.put(entry.getKey().toString(), entry.getValue().toString());
+        return result;
     }
 
     /**
@@ -433,7 +477,7 @@ public class Utils {
      * @param daemon Should the thread block JVM shutdown?
      * @return The unstarted thread
      */
-    public static Thread newThread(String name, Runnable runnable, Boolean daemon) {
+    public static Thread newThread(String name, Runnable runnable, boolean daemon) {
         Thread thread = new Thread(runnable, name);
         thread.setDaemon(daemon);
         thread.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
@@ -492,16 +536,13 @@ public class Utils {
      */
     public static String readFileAsString(String path, Charset charset) throws IOException {
         if (charset == null) charset = Charset.defaultCharset();
-        FileInputStream stream = new FileInputStream(new File(path));
-        String result = new String();
-        try {
+
+        try (FileInputStream stream = new FileInputStream(new File(path))) {
             FileChannel fc = stream.getChannel();
             MappedByteBuffer bb = fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size());
-            result = charset.decode(bb).toString();
-        } finally {
-            stream.close();
+            return charset.decode(bb).toString();
         }
-        return result;
+
     }
 
     public static String readFileAsString(String path) throws IOException {
@@ -524,4 +565,154 @@ public class Utils {
         return existingBuffer;
     }
 
+    /*
+     * Creates a set
+     * @param elems the elements
+     * @param <T> the type of element
+     * @return Set
+     */
+    @SafeVarargs
+    public static <T> Set<T> mkSet(T... elems) {
+        return new HashSet<>(Arrays.asList(elems));
+    }
+
+    /*
+     * Creates a list
+     * @param elems the elements
+     * @param <T> the type of element
+     * @return List
+     */
+    @SafeVarargs
+    public static <T> List<T> mkList(T... elems) {
+        return Arrays.asList(elems);
+    }
+
+
+    /*
+     * Create a string from a collection
+     * @param coll the collection
+     * @param separator the separator
+     */
+    public static <T> CharSequence mkString(Collection<T> coll, String separator) {
+        StringBuilder sb = new StringBuilder();
+        Iterator<T> iter = coll.iterator();
+        if (iter.hasNext()) {
+            sb.append(iter.next().toString());
+
+            while (iter.hasNext()) {
+                sb.append(separator);
+                sb.append(iter.next().toString());
+            }
+        }
+        return sb;
+    }
+
+    /**
+     * Recursively delete the given file/directory and any subfiles (if any exist)
+     *
+     * @param file The root file at which to begin deleting
+     */
+    public static void delete(File file) {
+        if (file == null) {
+            return;
+        } else if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            if (files != null) {
+                for (File f : files)
+                    delete(f);
+            }
+            file.delete();
+        } else {
+            file.delete();
+        }
+    }
+
+    /**
+     * Returns an empty collection if this list is null
+     * @param other
+     * @return
+     */
+    public static <T> List<T> safe(List<T> other) {
+        return other == null ? Collections.<T>emptyList() : other;
+    }
+
+   /**
+    * Get the ClassLoader which loaded Kafka.
+    */
+    public static ClassLoader getKafkaClassLoader() {
+        return Utils.class.getClassLoader();
+    }
+
+    /**
+     * Get the Context ClassLoader on this thread or, if not present, the ClassLoader that
+     * loaded Kafka.
+     *
+     * This should be used whenever passing a ClassLoader to Class.forName
+     */
+    public static ClassLoader getContextOrKafkaClassLoader() {
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
+        if (cl == null)
+            return getKafkaClassLoader();
+        else
+            return cl;
+    }
+
+    /**
+     * Attempts to move source to target atomically and falls back to a non-atomic move if it fails.
+     *
+     * @throws IOException if both atomic and non-atomic moves fail
+     */
+    public static void atomicMoveWithFallback(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException outer) {
+            try {
+                Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+                log.debug("Non-atomic move of " + source + " to " + target + " succeeded after atomic move failed due to "
+                        + outer.getMessage());
+            } catch (IOException inner) {
+                inner.addSuppressed(outer);
+                throw inner;
+            }
+        }
+    }
+
+    /**
+     * Closes all the provided closeables.
+     * @throws IOException if any of the close methods throws an IOException.
+     *         The first IOException is thrown with subsequent exceptions
+     *         added as suppressed exceptions.
+     */
+    public static void closeAll(Closeable... closeables) throws IOException {
+        IOException exception = null;
+        for (Closeable closeable : closeables) {
+            try {
+                closeable.close();
+            } catch (IOException e) {
+                if (exception != null)
+                    exception.addSuppressed(e);
+                else
+                    exception = e;
+            }
+        }
+        if (exception != null)
+            throw exception;
+    }
+
+    /**
+     * A cheap way to deterministically convert a number to a positive value. When the input is
+     * positive, the original value is returned. When the input number is negative, the returned
+     * positive value is the original value bit AND against 0x7fffffff which is not its absolutely
+     * value.
+     *
+     * Note: changing this method in the future will possibly cause partition selection not to be
+     * compatible with the existing messages already placed on a partition since it is used
+     * in producer's {@link org.apache.kafka.clients.producer.internals.DefaultPartitioner}
+     *
+     * @param number a given number
+     * @return a positive number.
+     */
+    public static int toPositive(int number) {
+        return number & 0x7fffffff;
+    }
 }

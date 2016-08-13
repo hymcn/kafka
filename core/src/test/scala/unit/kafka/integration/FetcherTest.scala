@@ -42,11 +42,11 @@ class FetcherTest extends KafkaServerTestHarness {
   @Before
   override def setUp() {
     super.setUp
-    TestUtils.createTopic(zkClient, topic, partitionReplicaAssignment = Map(0 -> Seq(configs.head.brokerId)), servers = servers)
+    TestUtils.createTopic(zkUtils, topic, partitionReplicaAssignment = Map(0 -> Seq(configs.head.brokerId)), servers = servers)
 
     val cluster = new Cluster(servers.map(s => new Broker(s.config.brokerId, "localhost", s.boundPort())))
 
-    fetcher = new ConsumerFetcherManager("consumer1", new ConsumerConfig(TestUtils.createConsumerProperties("", "", "")), zkClient)
+    fetcher = new ConsumerFetcherManager("consumer1", new ConsumerConfig(TestUtils.createConsumerProperties("", "", "")), zkUtils)
     fetcher.stopConnections()
     val topicInfos = configs.map(c =>
       new PartitionTopicInfo(topic,
@@ -68,11 +68,11 @@ class FetcherTest extends KafkaServerTestHarness {
   @Test
   def testFetcher() {
     val perNode = 2
-    var count = TestUtils.sendMessages(servers, topic, perNode).size
+    var count = TestUtils.produceMessages(servers, topic, perNode).size
 
     fetch(count)
     assertQueueEmpty()
-    count = TestUtils.sendMessages(servers, topic, perNode).size
+    count = TestUtils.produceMessages(servers, topic, perNode).size
     fetch(count)
     assertQueueEmpty()
   }

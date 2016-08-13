@@ -95,15 +95,6 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * Return true iff we are in the process of connecting
-     * @param id The id of the connection
-     */
-    public boolean isConnecting(String id) {
-        NodeConnectionState state = nodeState.get(id);
-        return state != null && state.state == ConnectionState.CONNECTING;
-    }
-
-    /**
      * Enter the connected state for the given connection
      * @param id The connection identifier
      */
@@ -115,10 +106,12 @@ final class ClusterConnectionStates {
     /**
      * Enter the disconnected state for the given node
      * @param id The connection we have disconnected
+     * @param now The current time
      */
-    public void disconnected(String id) {
+    public void disconnected(String id, long now) {
         NodeConnectionState nodeState = nodeState(id);
         nodeState.state = ConnectionState.DISCONNECTED;
+        nodeState.lastConnectAttemptMs = now;
     }
 
     /**
